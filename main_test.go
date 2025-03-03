@@ -10,27 +10,21 @@ import (
 
 	"net/http"
 	"net/http/httptest"
-
-	"k8s/pkg/recipes"
 )
 
-func TestRecipesHandlerCRUD_Integration(t *testing.T) {
+func TestNamedayHandler_Integration(t *testing.T) {
+	// Create a MemStore and Nameday Handler
+	store := NewMemStore()
+	namedayHandler := NewNamedayHandler(store)
 
-	// Create a MemStore and Recipe Handler
-	store := recipes.NewMemStore()
-	recipesHandler := NewRecipesHandler(store)
+	// Test data for nameday
+	namedayData := readTestData(t, "nameday_data.json")
+	namedayReader := bytes.NewReader(namedayData)
 
-	// Test data
-	hamAndCheese := readTestData(t, "ham_and_cheese_recipe.json")
-	hamAndCheeseReader := bytes.NewReader(hamAndCheese)
-
-	hamAndCheeseWithButter := readTestData(t, "ham_and_cheese_with_butter_recipe.json")
-	hamAndCheeseWithButterReader := bytes.NewReader(hamAndCheeseWithButter)
-
-	// CREATE - add a new recipe
-	req := httptest.NewRequest(http.MethodPost, "/recipes", hamAndCheeseReader)
+	// CREATE - add a new nameday
+	req := httptest.NewRequest(http.MethodPost, "/nameday", namedayReader)
 	w := httptest.NewRecorder()
-	recipesHandler.ServeHTTP(w, req)
+	namedayHandler.ServeHTTP(w, req)
 
 	res := w.Result()
 	defer res.Body.Close()
@@ -39,10 +33,10 @@ func TestRecipesHandlerCRUD_Integration(t *testing.T) {
 	saved, _ := store.List()
 	assert.Len(t, saved, 1)
 
-	// GET - find the record you just added
-	req = httptest.NewRequest(http.MethodGet, "/recipes/ham-and-cheese-toasties", nil)
+	// GET - find the nameday you just added
+	req = httptest.NewRequest(http.MethodGet, "/nameday/john", nil)
 	w = httptest.NewRecorder()
-	recipesHandler.ServeHTTP(w, req)
+	namedayHandler.ServeHTTP(w, req)
 
 	res = w.Result()
 	defer res.Body.Close()
@@ -53,26 +47,29 @@ func TestRecipesHandlerCRUD_Integration(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	assert.JSONEq(t, string(hamAndCheese), string(data))
+	assert.JSONEq(t, string(namedayData), string(data))
 
-	// UPDATE - add butter to ham and cheese recipe
-	req = httptest.NewRequest(http.MethodPut, "/recipes/ham-and-cheese-toasties", hamAndCheeseWithButterReader)
+	// UPDATE - update nameday data
+	updatedNamedayData := readTestData(t, "updated_nameday_data.json")
+	updatedNamedayReader := bytes.NewReader(updatedNamedayData)
+
+	req = httptest.NewRequest(http.MethodPut, "/nameday/john", updatedNamedayReader)
 	w = httptest.NewRecorder()
-	recipesHandler.ServeHTTP(w, req)
+	namedayHandler.ServeHTTP(w, req)
 
 	res = w.Result()
 	defer res.Body.Close()
 	assert.Equal(t, 200, res.StatusCode)
 
-	updatedHamAndCheese, err := store.Get("ham-and-cheese-toasties")
+	updatedNameday, err := store.Get("john")
 	assert.NoError(t, err)
 
-	assert.Contains(t, updatedHamAndCheese.Ingredients, recipes.Ingredient{Name: "butter"})
+	assert.JSONEq(t, string(updatedNamedayData), string(updatedNameday))
 
-	// DELETE - remove the ham and cheese recipe
-	req = httptest.NewRequest(http.MethodDelete, "/recipes/ham-and-cheese-toasties", nil)
+	// DELETE - remove the nameday
+	req = httptest.NewRequest(http.MethodDelete, "/nameday/john", nil)
 	w = httptest.NewRecorder()
-	recipesHandler.ServeHTTP(w, req)
+	namedayHandler.ServeHTTP(w, req)
 
 	res = w.Result()
 	defer res.Body.Close()
@@ -80,7 +77,6 @@ func TestRecipesHandlerCRUD_Integration(t *testing.T) {
 
 	saved, _ = store.List()
 	assert.Len(t, saved, 0)
-
 }
 
 func readTestData(t *testing.T, name string) []byte {
