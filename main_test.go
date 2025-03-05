@@ -4,89 +4,73 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"net/http"
-	"net/http/httptest"
 )
 
 func TestNamedayHandler_Integration(t *testing.T) {
-	// Create a MemStore and Nameday Handler
 	store := NewMemStore()
 	namedayHandler := NewNamedayHandler(store)
-
-	// Test data for nameday
 	namedayData := readTestData(t, "nameday_data.json")
 	namedayReader := bytes.NewReader(namedayData)
 
-	// CREATE - add a new nameday
 	req := httptest.NewRequest(http.MethodPost, "/nameday", namedayReader)
 	w := httptest.NewRecorder()
 	namedayHandler.ServeHTTP(w, req)
-
 	res := w.Result()
 	defer res.Body.Close()
-	assert.Equal(t, 200, res.StatusCode)
+	assert.Equal(t, 200, res.StatusCode, "Expected status code 200 for POST request")
 
 	saved, _ := store.List()
-	assert.Len(t, saved, 1)
+	assert.Len(t, saved, 1, "Expected store to have 1 item after POST request")
 
-	// GET - find the nameday you just added
 	req = httptest.NewRequest(http.MethodGet, "/nameday/john", nil)
 	w = httptest.NewRecorder()
 	namedayHandler.ServeHTTP(w, req)
-
 	res = w.Result()
 	defer res.Body.Close()
-	assert.Equal(t, 200, res.StatusCode)
+	assert.Equal(t, 200, res.StatusCode, "Expected status code 200 for GET request")
 
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
+	assert.JSONEq(t, string(namedayData), string(data), "Expected JSON data to match")
 
-	assert.JSONEq(t, string(namedayData), string(data))
-
-	// UPDATE - update nameday data
-	updatedNamedayData := readTestData(t, "updated_nameday_data.json")
+	updatedNamedayData := readTestData(t, "nameday_data.json")
 	updatedNamedayReader := bytes.NewReader(updatedNamedayData)
-
 	req = httptest.NewRequest(http.MethodPut, "/nameday/john", updatedNamedayReader)
 	w = httptest.NewRecorder()
 	namedayHandler.ServeHTTP(w, req)
-
 	res = w.Result()
 	defer res.Body.Close()
-	assert.Equal(t, 200, res.StatusCode)
+	assert.Equal(t, 200, res.StatusCode, "Expected status code 200 for PUT request")
 
 	updatedNameday, err := store.Get("john")
-	assert.NoError(t, err)
-
+	assert.NoError(t, err, "Expected no error when getting updated nameday")
 	updatedNamedayDataBytes, _ := json.Marshal(updatedNameday)
-	assert.JSONEq(t, string(updatedNamedayData), string(updatedNamedayDataBytes))
+	assert.JSONEq(t, string(updatedNamedayData), string(updatedNamedayDataBytes), "Expected JSON data to match")
 
-	// DELETE - remove the nameday
 	req = httptest.NewRequest(http.MethodDelete, "/nameday/john", nil)
 	w = httptest.NewRecorder()
 	namedayHandler.ServeHTTP(w, req)
-
 	res = w.Result()
 	defer res.Body.Close()
-	assert.Equal(t, 200, res.StatusCode)
+	assert.Equal(t, 200, res.StatusCode, "Expected status code 200 for DELETE request")
 
 	saved, _ = store.List()
-	assert.Len(t, saved, 0)
+	assert.Len(t, saved, 0, "Expected store to be empty after DELETE request")
 }
 
 func readTestData(t *testing.T, name string) []byte {
 	t.Helper()
 	content, err := os.ReadFile(os.Getenv("PWD") + "/testdata/" + name)
 	if err != nil {
-		t.Errorf("Could not read %v", name)
+		t.Fatalf("Could not read %v: %v", name, err)
 	}
-
 	return content
 }
