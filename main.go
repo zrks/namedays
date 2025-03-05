@@ -39,7 +39,10 @@ func (h *homeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	htmlOutput := RenderHTMLList(parsedData[GetCurrentMonthDate()])
+	currentMonth := GetCurrentMonth()
+	namedaysInMonth := FilterNamedaysByMonth(parsedData, currentMonth)
+
+	htmlOutput := RenderHTMLList(namedaysInMonth)
 	w.Write([]byte(htmlOutput))
 }
 
@@ -65,6 +68,34 @@ func ReadJSONFromURL(url string) (map[string][]string, error) {
 	}
 
 	return result, nil
+}
+
+func FilterNamedaysByMonth(namedays map[string][]string, month string) []string {
+	var result []string
+	for date, names := range namedays {
+		if strings.HasPrefix(date, month) {
+			result = append(result, fmt.Sprintf("%s: %s", date, strings.Join(names, ", ")))
+		}
+	}
+	return result
+}
+
+func RenderHTMLList(items []string) string {
+	var sb strings.Builder
+	sb.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
+	sb.WriteString("  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+	sb.WriteString("  <title>Namedays</title>\n</head>\n<body>\n  <ul>\n")
+
+	for _, item := range items {
+		sb.WriteString(fmt.Sprintf("    <li>%s</li>\n", item))
+	}
+
+	sb.WriteString("  </ul>\n</body>\n</html>")
+	return sb.String()
+}
+
+func GetCurrentMonth() string {
+	return time.Now().Format("01")
 }
 
 type namedayStore interface {
@@ -236,20 +267,6 @@ func InternalServerErrorHandler(w http.ResponseWriter, r *http.Request) {
 func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotFound)
 	w.Write([]byte("404 Not Found"))
-}
-
-func RenderHTMLList(items []string) string {
-	var sb strings.Builder
-	sb.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
-	sb.WriteString("  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
-	sb.WriteString("  <title>Generated List</title>\n</head>\n<body>\n  <ul>\n")
-
-	for _, item := range items {
-		sb.WriteString(fmt.Sprintf("    <li>%s</li>\n", item))
-	}
-
-	sb.WriteString("  </ul>\n</body>\n</html>")
-	return sb.String()
 }
 
 func GetCurrentMonthDate() string {

@@ -64,7 +64,8 @@ func TestNamedayHandler_Integration(t *testing.T) {
 	updatedNameday, err := store.Get("john")
 	assert.NoError(t, err)
 
-	assert.JSONEq(t, string(updatedNamedayData), string(updatedNameday))
+	updatedNamedayDataBytes, _ := json.Marshal(updatedNameday)
+	assert.JSONEq(t, string(updatedNamedayData), string(updatedNamedayDataBytes))
 
 	// DELETE - remove the nameday
 	req = httptest.NewRequest(http.MethodDelete, "/nameday/john", nil)
