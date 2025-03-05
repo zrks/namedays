@@ -138,6 +138,33 @@ func (m *MemStore) Get(name string) (Nameday, error) {
 	return nameday, nil
 }
 
+type NamedayHandler struct {
+	store namedayStore
+}
+
+func NewMemStore() *MemStore {
+	return &MemStore{
+		data: make(map[string]Nameday),
+	}
+}
+
+type MemStore struct {
+	data map[string]Nameday
+}
+
+func (m *MemStore) Add(name string, nameday Nameday) error {
+	m.data[name] = nameday
+	return nil
+}
+
+func (m *MemStore) Get(name string) (Nameday, error) {
+	nameday, exists := m.data[name]
+	if !exists {
+		return Nameday{}, fmt.Errorf("nameday not found")
+	}
+	return nameday, nil
+}
+
 func (m *MemStore) List() (map[string]Nameday, error) {
 	return m.data, nil
 }
@@ -267,4 +294,22 @@ func InternalServerErrorHandler(w http.ResponseWriter, r *http.Request) {
 func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotFound)
 	w.Write([]byte("404 Not Found"))
+}
+
+func RenderHTMLList(items []string) string {
+	var sb strings.Builder
+	sb.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
+	sb.WriteString("  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+	sb.WriteString("  <title>Generated List</title>\n</head>\n<body>\n  <ul>\n")
+
+	for _, item := range items {
+		sb.WriteString(fmt.Sprintf("    <li>%s</li>\n", item))
+	}
+
+	sb.WriteString("  </ul>\n</body>\n</html>")
+	return sb.String()
+}
+
+func GetCurrentMonthDate() string {
+	return time.Now().Format("01-02")
 }
