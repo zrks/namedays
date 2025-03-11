@@ -9,24 +9,22 @@ import (
 	"strings"
 	"time"
 
-	"k8s/pkg/recipes"
-
 	"github.com/gosimple/slug"
 )
 
 var (
-	RecipeRe       = regexp.MustCompile(`^/recipes/*$`)
-	RecipeReWithID = regexp.MustCompile(`^/recipes/([a-z0-9]+(?:-[a-z0-9]+)+)$`)
+	NamedayRe       = regexp.MustCompile(`^/nameday/*$`)
+	NamedayReWithID = regexp.MustCompile(`^/nameday/([a-z0-9]+(?:-[a-z0-9]+)+)$`)
 )
 
 func main() {
-	store := recipes.NewMemStore()
-	recipesHandler := NewRecipesHandler(store)
+	store := NewMemStore()
+	namedayHandler := NewNamedayHandler(store)
 	mux := http.NewServeMux()
 
 	mux.Handle("/", &homeHandler{})
-	mux.Handle("/recipes", recipesHandler)
-	mux.Handle("/recipes/", recipesHandler)
+	mux.Handle("/nameday", namedayHandler)
+	mux.Handle("/nameday/", namedayHandler)
 
 	http.ListenAndServe(":8080", mux)
 }
@@ -41,7 +39,10 @@ func (h *homeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	htmlOutput := RenderHTMLList(parsedData[GetCurrentMonthDate()])
+	currentMonth := GetCurrentMonth()
+	namedaysInMonth := FilterNamedaysByMonth(parsedData, currentMonth)
+
+	htmlOutput := RenderHTMLList(namedaysInMonth)
 	w.Write([]byte(htmlOutput))
 }
 
@@ -69,58 +70,123 @@ func ReadJSONFromURL(url string) (map[string][]string, error) {
 	return result, nil
 }
 
-type recipeStore interface {
-	Add(name string, recipes recipes.Recipe) error
-	Get(name string) (recipes.Recipe, error)
-	List() (map[string]recipes.Recipe, error)
-	Update(name string, recipe recipes.Recipe) error
+func FilterNamedaysByMonth(namedays map[string][]string, month string) []string {
+	var result []string
+	for date, names := range namedays {
+		if strings.HasPrefix(date, month) {
+			result = append(result, fmt.Sprintf("%s: %s", date, strings.Join(names, ", ")))
+		}
+	}
+	return result
+}
+
+func RenderHTMLList(items []string) string {
+	var sb strings.Builder
+	sb.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
+	sb.WriteString("  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+	sb.WriteString("  <title>Namedays</title>\n</head>\n<body>\n  <ul>\n")
+
+	for _, item := range items {
+		sb.WriteString(fmt.Sprintf("    <li>%s</li>\n", item))
+	}
+
+	sb.WriteString("  </ul>\n</body>\n</html>")
+	return sb.String()
+}
+
+func GetCurrentMonth() string {
+	return time.Now().Format("01")
+}
+
+type namedayStore interface {
+	Add(name string, nameday Nameday) error
+	Get(name string) (Nameday, error)
+	List() (map[string]Nameday, error)
+	Update(name string, nameday Nameday) error
 	Remove(name string) error
 }
 
-type RecipesHandler struct {
-	store recipeStore
+type Nameday struct {
+	Name string `json:"name"`
+	Date string `json:"date"`
 }
 
-func NewRecipesHandler(s recipeStore) *RecipesHandler {
-	return &RecipesHandler{store: s}
+type NamedayHandler struct {
+	store namedayStore
 }
 
-func (h *RecipesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func NewMemStore() *MemStore {
+	return &MemStore{
+		data: make(map[string]Nameday),
+	}
+}
+
+type MemStore struct {
+	data map[string]Nameday
+}
+
+func (m *MemStore) Add(name string, nameday Nameday) error {
+	m.data[name] = nameday
+	return nil
+}
+
+func (m *MemStore) Get(name string) (Nameday, error) {
+	nameday, exists := m.data[name]
+	if !exists {
+		return Nameday{}, fmt.Errorf("nameday not found")
+	}
+	return nameday, nil
+}
+
+func (m *MemStore) List() (map[string]Nameday, error) {
+	return m.data, nil
+}
+
+func (m *MemStore) Update(name string, nameday Nameday) error {
+	m.data[name] = nameday
+	return nil
+}
+
+func (m *MemStore) Remove(name string) error {
+	delete(m.data, name)
+	return nil
+}
+
+func NewNamedayHandler(s namedayStore) *NamedayHandler {
+	return &NamedayHandler{store: s}
+}
+
+func (h *NamedayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
-	case r.Method == http.MethodPost && RecipeRe.MatchString(r.URL.Path):
-		h.CreateRecipe(w, r)
-	case r.Method == http.MethodGet && RecipeRe.MatchString(r.URL.Path):
-		h.ListRecipes(w, r)
-	case r.Method == http.MethodGet && RecipeReWithID.MatchString(r.URL.Path):
-		h.GetRecipe(w, r)
-	case r.Method == http.MethodPut && RecipeReWithID.MatchString(r.URL.Path):
-		h.UpdateRecipe(w, r)
-	case r.Method == http.MethodDelete && RecipeReWithID.MatchString(r.URL.Path):
-		h.DeleteRecipe(w, r)
+	case r.Method == http.MethodPost && NamedayRe.MatchString(r.URL.Path):
+		h.CreateNameday(w, r)
+	case r.Method == http.MethodGet && NamedayRe.MatchString(r.URL.Path):
+		h.ListNamedays(w, r)
+	case r.Method == http.MethodGet && NamedayReWithID.MatchString(r.URL.Path):
+		h.GetNameday(w, r)
+	case r.Method == http.MethodPut && NamedayReWithID.MatchString(r.URL.Path):
+		h.UpdateNameday(w, r)
+	case r.Method == http.MethodDelete && NamedayReWithID.MatchString(r.URL.Path):
+		h.DeleteNameday(w, r)
 	default:
 		NotFoundHandler(w, r)
 	}
 }
 
-func (h *RecipesHandler) GetRecipe(w http.ResponseWriter, r *http.Request) {
-	matches := RecipeReWithID.FindStringSubmatch(r.URL.Path)
+func (h *NamedayHandler) GetNameday(w http.ResponseWriter, r *http.Request) {
+	matches := NamedayReWithID.FindStringSubmatch(r.URL.Path)
 	if len(matches) < 2 {
 		InternalServerErrorHandler(w, r)
 		return
 	}
 
-	recipe, err := h.store.Get(matches[1])
+	nameday, err := h.store.Get(matches[1])
 	if err != nil {
-		if err == recipes.NotFoundErr {
-			NotFoundHandler(w, r)
-			return
-		}
-
-		InternalServerErrorHandler(w, r)
+		NotFoundHandler(w, r)
 		return
 	}
 
-	jsonBytes, err := json.Marshal(recipe)
+	jsonBytes, err := json.Marshal(nameday)
 	if err != nil {
 		InternalServerErrorHandler(w, r)
 		return
@@ -130,41 +196,35 @@ func (h *RecipesHandler) GetRecipe(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonBytes)
 }
 
-func (h *RecipesHandler) CreateRecipe(w http.ResponseWriter, r *http.Request) {
-	var recipe recipes.Recipe
-	if err := json.NewDecoder(r.Body).Decode(&recipe); err != nil {
+func (h *NamedayHandler) CreateNameday(w http.ResponseWriter, r *http.Request) {
+	var nameday Nameday
+	if err := json.NewDecoder(r.Body).Decode(&nameday); err != nil {
 		InternalServerErrorHandler(w, r)
 		return
 	}
 
-	resourceID := slug.Make(recipe.Name)
-	if err := h.store.Add(resourceID, recipe); err != nil {
-		fmt.Println(err)
+	resourceID := slug.Make(nameday.Name)
+	if err := h.store.Add(resourceID, nameday); err != nil {
 		InternalServerErrorHandler(w, r)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *RecipesHandler) UpdateRecipe(w http.ResponseWriter, r *http.Request) {
-	matches := RecipeReWithID.FindStringSubmatch(r.URL.Path)
+func (h *NamedayHandler) UpdateNameday(w http.ResponseWriter, r *http.Request) {
+	matches := NamedayReWithID.FindStringSubmatch(r.URL.Path)
 	if len(matches) < 2 {
 		InternalServerErrorHandler(w, r)
 		return
 	}
 
-	// Recipe object that will be populated from JSON payload
-	var recipe recipes.Recipe
-	if err := json.NewDecoder(r.Body).Decode(&recipe); err != nil {
+	var nameday Nameday
+	if err := json.NewDecoder(r.Body).Decode(&nameday); err != nil {
 		InternalServerErrorHandler(w, r)
 		return
 	}
 
-	if err := h.store.Update(matches[1], recipe); err != nil {
-		if err == recipes.NotFoundErr {
-			NotFoundHandler(w, r)
-			return
-		}
+	if err := h.store.Update(matches[1], nameday); err != nil {
 		InternalServerErrorHandler(w, r)
 		return
 	}
@@ -172,20 +232,20 @@ func (h *RecipesHandler) UpdateRecipe(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *RecipesHandler) ListRecipes(w http.ResponseWriter, r *http.Request) {
-	recipesList, err := h.store.List()
+func (h *NamedayHandler) ListNamedays(w http.ResponseWriter, r *http.Request) {
+	namedaysList, err := h.store.List()
 	if err != nil {
 		InternalServerErrorHandler(w, r)
 		return
 	}
 
-	jsonBytes, _ := json.Marshal(recipesList)
+	jsonBytes, _ := json.Marshal(namedaysList)
 	w.WriteHeader(http.StatusOK)
 	w.Write(jsonBytes)
 }
 
-func (h *RecipesHandler) DeleteRecipe(w http.ResponseWriter, r *http.Request) {
-	matches := RecipeReWithID.FindStringSubmatch(r.URL.Path)
+func (h *NamedayHandler) DeleteNameday(w http.ResponseWriter, r *http.Request) {
+	matches := NamedayReWithID.FindStringSubmatch(r.URL.Path)
 	if len(matches) < 2 {
 		InternalServerErrorHandler(w, r)
 		return
@@ -207,20 +267,6 @@ func InternalServerErrorHandler(w http.ResponseWriter, r *http.Request) {
 func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotFound)
 	w.Write([]byte("404 Not Found"))
-}
-
-func RenderHTMLList(items []string) string {
-	var sb strings.Builder
-	sb.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
-	sb.WriteString("  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
-	sb.WriteString("  <title>Generated List</title>\n</head>\n<body>\n  <ul>\n")
-
-	for _, item := range items {
-		sb.WriteString(fmt.Sprintf("    <li>%s</li>\n", item))
-	}
-
-	sb.WriteString("  </ul>\n</body>\n</html>")
-	return sb.String()
 }
 
 func GetCurrentMonthDate() string {
