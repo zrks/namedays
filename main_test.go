@@ -9,13 +9,22 @@ import (
 	"time"
 )
 
-func TestNamedayHandler_CreateNameday(t *testing.T) {
+const (
+	errFailedToCreateRequest = "Failed to create request: %v"
+	testPersonKey            = "test-person"
+	testJohnSmith            = "John Smith"
+	johnSmithKey             = "john-smith"
+	johnSmithPath            = "/nameday/" + johnSmithKey
+	errWrongStatusCode       = "Handler returned wrong status code: got %v want %v"
+)
+
+func TestNamedayHandlerCreateNameday(t *testing.T) {
 	store := NewMemStore()
 	handler := NewNamedayHandler(store)
 
 	// Test data
 	nameday := Nameday{
-		Name: "John Smith",
+		Name: testJohnSmith,
 		Date: "04-12",
 	}
 	jsonData, _ := json.Marshal(nameday)
@@ -23,7 +32,7 @@ func TestNamedayHandler_CreateNameday(t *testing.T) {
 	// Create a request
 	req, err := http.NewRequest(http.MethodPost, "/nameday", bytes.NewBuffer(jsonData))
 	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
+		t.Fatalf(errFailedToCreateRequest, err)
 	}
 
 	// Record the response
@@ -32,11 +41,11 @@ func TestNamedayHandler_CreateNameday(t *testing.T) {
 
 	// Check response
 	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		t.Errorf(errWrongStatusCode, status, http.StatusOK)
 	}
 
 	// Verify data was stored correctly
-	storedNameday, err := store.Get("john-smith")
+	storedNameday, err := store.Get(johnSmithKey)
 	if err != nil {
 		t.Fatalf("Failed to retrieve created nameday: %v", err)
 	}
@@ -45,21 +54,21 @@ func TestNamedayHandler_CreateNameday(t *testing.T) {
 	}
 }
 
-func TestNamedayHandler_GetNameday(t *testing.T) {
+func TestNamedayHandlerGetNameday(t *testing.T) {
 	store := NewMemStore()
 	handler := NewNamedayHandler(store)
 
 	// Add test data
 	testNameday := Nameday{
-		Name: "John Smith",
+		Name: testJohnSmith,
 		Date: "04-12",
 	}
-	store.Add("john-smith", testNameday)
+	store.Add(johnSmithKey, testNameday)
 
 	// Create a request
-	req, err := http.NewRequest(http.MethodGet, "/nameday/john-smith", nil)
+	req, err := http.NewRequest(http.MethodGet, johnSmithPath, nil)
 	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
+		t.Fatalf(errFailedToCreateRequest, err)
 	}
 
 	// Record the response
@@ -68,7 +77,7 @@ func TestNamedayHandler_GetNameday(t *testing.T) {
 
 	// Check response
 	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		t.Errorf(errWrongStatusCode, status, http.StatusOK)
 	}
 
 	// Verify response data
@@ -81,14 +90,14 @@ func TestNamedayHandler_GetNameday(t *testing.T) {
 	}
 }
 
-func TestNamedayHandler_GetNameday_NotFound(t *testing.T) {
+func TestNamedayHandlerGetNamedayNotFound(t *testing.T) {
 	store := NewMemStore()
 	handler := NewNamedayHandler(store)
 
 	// Create a request for non-existent nameday
 	req, err := http.NewRequest(http.MethodGet, "/nameday/non-existent", nil)
 	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
+		t.Fatalf(errFailedToCreateRequest, err)
 	}
 
 	// Record the response
@@ -97,32 +106,32 @@ func TestNamedayHandler_GetNameday_NotFound(t *testing.T) {
 
 	// Check response - should be 404
 	if status := rr.Code; status != http.StatusNotFound {
-		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
+		t.Errorf(errWrongStatusCode, status, http.StatusNotFound)
 	}
 }
 
-func TestNamedayHandler_UpdateNameday(t *testing.T) {
+func TestNamedayHandlerUpdateNameday(t *testing.T) {
 	store := NewMemStore()
 	handler := NewNamedayHandler(store)
 
 	// Add initial data
 	initialNameday := Nameday{
-		Name: "John Smith",
+		Name: testJohnSmith,
 		Date: "04-12",
 	}
-	store.Add("john-smith", initialNameday)
+	store.Add(johnSmithKey, initialNameday)
 
 	// Updated data
 	updatedNameday := Nameday{
-		Name: "John Smith",
+		Name: testJohnSmith,
 		Date: "05-15", // Changed date
 	}
 	jsonData, _ := json.Marshal(updatedNameday)
 
 	// Create a request
-	req, err := http.NewRequest(http.MethodPut, "/nameday/john-smith", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest(http.MethodPut, johnSmithPath, bytes.NewBuffer(jsonData))
 	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
+		t.Fatalf(errFailedToCreateRequest, err)
 	}
 
 	// Record the response
@@ -131,11 +140,11 @@ func TestNamedayHandler_UpdateNameday(t *testing.T) {
 
 	// Check response
 	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		t.Errorf(errWrongStatusCode, status, http.StatusOK)
 	}
 
 	// Verify data was updated correctly
-	storedNameday, err := store.Get("john-smith")
+	storedNameday, err := store.Get(johnSmithKey)
 	if err != nil {
 		t.Fatalf("Failed to retrieve updated nameday: %v", err)
 	}
@@ -144,21 +153,21 @@ func TestNamedayHandler_UpdateNameday(t *testing.T) {
 	}
 }
 
-func TestNamedayHandler_DeleteNameday(t *testing.T) {
+func TestNamedayHandlerDeleteNameday(t *testing.T) {
 	store := NewMemStore()
 	handler := NewNamedayHandler(store)
 
 	// Add test data
 	testNameday := Nameday{
-		Name: "John Smith",
+		Name: testJohnSmith,
 		Date: "04-12",
 	}
-	store.Add("john-smith", testNameday)
+	store.Add(johnSmithKey, testNameday)
 
 	// Create a request
-	req, err := http.NewRequest(http.MethodDelete, "/nameday/john-smith", nil)
+	req, err := http.NewRequest(http.MethodDelete, johnSmithPath, nil)
 	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
+		t.Fatalf(errFailedToCreateRequest, err)
 	}
 
 	// Record the response
@@ -167,32 +176,32 @@ func TestNamedayHandler_DeleteNameday(t *testing.T) {
 
 	// Check response
 	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		t.Errorf(errWrongStatusCode, status, http.StatusOK)
 	}
 
 	// Verify data was deleted
-	_, err = store.Get("john-smith")
+	_, err = store.Get(johnSmithKey)
 	if err == nil {
 		t.Errorf("Nameday was not deleted as expected")
 	}
 }
 
-func TestNamedayHandler_ListNamedays(t *testing.T) {
+func TestNamedayHandlerListNamedays(t *testing.T) {
 	store := NewMemStore()
 	handler := NewNamedayHandler(store)
 
 	// Add test data
 	testNamedays := []Nameday{
-		{Name: "John Smith", Date: "04-12"},
+		{Name: testJohnSmith, Date: "04-12"},
 		{Name: "Jane Doe", Date: "05-15"},
 	}
-	store.Add("john-smith", testNamedays[0])
+	store.Add(johnSmithKey, testNamedays[0])
 	store.Add("jane-doe", testNamedays[1])
 
 	// Create a request
 	req, err := http.NewRequest(http.MethodGet, "/nameday", nil)
 	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
+		t.Fatalf(errFailedToCreateRequest, err)
 	}
 
 	// Record the response
@@ -201,7 +210,7 @@ func TestNamedayHandler_ListNamedays(t *testing.T) {
 
 	// Check response
 	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		t.Errorf(errWrongStatusCode, status, http.StatusOK)
 	}
 
 	// Verify response data
@@ -212,22 +221,22 @@ func TestNamedayHandler_ListNamedays(t *testing.T) {
 	if len(responseNamedays) != 2 {
 		t.Errorf("Expected 2 namedays, got %d", len(responseNamedays))
 	}
-	if _, exists := responseNamedays["john-smith"]; !exists {
-		t.Errorf("Expected 'john-smith' to be in the response")
+	if _, exists := responseNamedays[johnSmithKey]; !exists {
+		t.Errorf("Expected '%s' to be in the response", johnSmithKey)
 	}
 	if _, exists := responseNamedays["jane-doe"]; !exists {
 		t.Errorf("Expected 'jane-doe' to be in the response")
 	}
 }
 
-func TestNamedayHandler_InvalidMethod(t *testing.T) {
+func TestNamedayHandlerInvalidMethod(t *testing.T) {
 	store := NewMemStore()
 	handler := NewNamedayHandler(store)
 
 	// Create a request with invalid method
-	req, err := http.NewRequest(http.MethodPatch, "/nameday/john-smith", nil)
+	req, err := http.NewRequest(http.MethodPatch, johnSmithPath, nil)
 	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
+		t.Fatalf(errFailedToCreateRequest, err)
 	}
 
 	// Record the response
@@ -236,7 +245,7 @@ func TestNamedayHandler_InvalidMethod(t *testing.T) {
 
 	// Check response - should be 404 (not found for invalid method)
 	if status := rr.Code; status != http.StatusNotFound {
-		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusNotFound)
+		t.Errorf(errWrongStatusCode, status, http.StatusNotFound)
 	}
 }
 
@@ -336,12 +345,12 @@ func TestMemStore(t *testing.T) {
 
 	// Test Add and Get
 	nameday := Nameday{Name: "Test Person", Date: "05-05"}
-	err := store.Add("test-person", nameday)
+	err := store.Add(testPersonKey, nameday)
 	if err != nil {
 		t.Fatalf("Failed to add nameday: %v", err)
 	}
 
-	retrieved, err := store.Get("test-person")
+	retrieved, err := store.Get(testPersonKey)
 	if err != nil {
 		t.Fatalf("Failed to get nameday: %v", err)
 	}
@@ -360,12 +369,12 @@ func TestMemStore(t *testing.T) {
 
 	// Test Update
 	updatedNameday := Nameday{Name: "Test Person Updated", Date: "06-06"}
-	err = store.Update("test-person", updatedNameday)
+	err = store.Update(testPersonKey, updatedNameday)
 	if err != nil {
 		t.Fatalf("Failed to update nameday: %v", err)
 	}
 
-	retrieved, err = store.Get("test-person")
+	retrieved, err = store.Get(testPersonKey)
 	if err != nil {
 		t.Fatalf("Failed to get updated nameday: %v", err)
 	}
@@ -374,12 +383,12 @@ func TestMemStore(t *testing.T) {
 	}
 
 	// Test Remove
-	err = store.Remove("test-person")
+	err = store.Remove(testPersonKey)
 	if err != nil {
 		t.Fatalf("Failed to remove nameday: %v", err)
 	}
 
-	_, err = store.Get("test-person")
+	_, err = store.Get(testPersonKey)
 	if err == nil {
 		t.Errorf("Expected error when getting removed nameday")
 	}
