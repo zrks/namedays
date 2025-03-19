@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gosimple/slug"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
@@ -32,18 +34,69 @@ func main() {
 type homeHandler struct{}
 
 func (h *homeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	url := "https://gist.githubusercontent.com/laacz/5cccb056a533dffb2165/raw/5af9c97ef0b7c0256cbbf393bc45822aeb9ceba9/namedays-extended.json"
-	parsedData, err := ReadJSONFromURL(url)
+	// Open the database connection
+	db, err := sql.Open("sqlite3", "./namedays.db")
 	if err != nil {
-		fmt.Println("Error:", err)
+		InternalServerErrorHandler(w, r)
+		return
+	}
+	defer db.Close()
+
+	// Get today's namedays
+	names, err := getNameday(db)
+	if err != nil {
+		InternalServerErrorHandler(w, r)
 		return
 	}
 
-	currentMonth := GetCurrentMonth()
-	namedaysInMonth := FilterNamedaysByMonth(parsedData, currentMonth)
+	// Create HTML response
+	var sb strings.Builder
+	sb.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
+	sb.WriteString("  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+	sb.WriteString("  <title>Today's Namedays</title>\n</head>\n<body>\n")
+	sb.WriteString(fmt.Sprintf("  <h1>Namedays for %s</h1>\n", time.Now().Format("January 2")))
 
-	htmlOutput := RenderHTMLList(namedaysInMonth)
-	w.Write([]byte(htmlOutput))
+	if len(names) == 0 {
+		sb.WriteString("  <p>No namedays found for today</p>\n")
+	} else {
+		sb.WriteString("  <ul>\n")
+		for _, name := range names {
+			sb.WriteString(fmt.Sprintf("    <li>%s</li>\n", name))
+		}
+		sb.WriteString("  </ul>\n")
+	}
+
+	sb.WriteString("</body>\n</html>")
+	w.Write([]byte(sb.String()))
+}
+
+func getNameday(db *sql.DB) ([]string, error) {
+	// Get today's date in the format "MM-DD"
+	today := time.Now().Format("01-02")
+
+	// Query the database for names on today's date
+	rows, err := db.Query("SELECT name FROM namedays WHERE date = ?", today)
+	if err != nil {
+		return nil, fmt.Errorf("error querying database: %w", err)
+	}
+	defer rows.Close()
+
+	// Collect all names for today
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("error scanning row: %w", err)
+		}
+		names = append(names, name)
+	}
+
+	// Check for any errors during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return names, nil
 }
 
 func ReadJSONFromURL(url string) (map[string][]string, error) {
