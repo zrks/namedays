@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -19,23 +20,106 @@ var (
 	NamedayReWithID = regexp.MustCompile(`^/nameday/([a-z0-9]+(?:-[a-z0-9]+)+)$`)
 )
 
+// insertNamedaysFromJSON inserts namedays from JSON file into the database
+func insertNamedaysFromJSON(db *sql.DB) error {
+	jsonData, err := os.ReadFile("db-ops/namedays.json")
+	if err != nil {
+		return fmt.Errorf("failed to read namedays.json: %w", err)
+	}
+
+	var namedays map[string][]string
+	if err := json.Unmarshal(jsonData, &namedays); err != nil {
+		return fmt.Errorf("failed to parse namedays.json: %w", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	stmt, err := tx.Prepare("INSERT INTO namedays (date, name) VALUES (?, ?)")
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for date, names := range namedays {
+		for _, name := range names {
+			if _, err = stmt.Exec(date, name); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to insert nameday: %w", err)
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+// InitDB ensures the database exists and has the proper schema
+func InitDB(dbPath string) error {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	query := `CREATE TABLE IF NOT EXISTS namedays (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, name TEXT NOT NULL);`
+	if _, err = db.Exec(query); err != nil {
+		return fmt.Errorf("failed to create table: %w", err)
+	}
+
+	var count int
+	if err = db.QueryRow("SELECT COUNT(*) FROM namedays").Scan(&count); err != nil {
+		return fmt.Errorf("failed to check table count: %w", err)
+	}
+
+	if count == 0 {
+		fmt.Println("Reading namedays from JSON file...")
+		if err = insertNamedaysFromJSON(db); err != nil {
+			return err
+		}
+		fmt.Println("Namedays data inserted successfully")
+	}
+
+	return nil
+}
+
 func main() {
+	// Initialize database
+	dbPath := "./namedays.db"
+	if err := InitDB(dbPath); err != nil {
+		fmt.Printf("Error initializing database: %v\n", err)
+		return
+	}
+
 	store := NewMemStore()
 	namedayHandler := NewNamedayHandler(store)
+	homeHandler := NewHomeHandler(dbPath)
 	mux := http.NewServeMux()
 
-	mux.Handle("/", &homeHandler{})
+	mux.Handle("/", homeHandler)
 	mux.Handle("/nameday", namedayHandler)
 	mux.Handle("/nameday/", namedayHandler)
 
+	fmt.Println("Server starting on :8080...")
 	http.ListenAndServe(":8080", mux)
 }
 
-type homeHandler struct{}
+type homeHandler struct {
+	dbPath string
+}
+
+func NewHomeHandler(dbPath string) *homeHandler {
+	if dbPath == "" {
+		dbPath = "./namedays.db"
+	}
+	return &homeHandler{dbPath: dbPath}
+}
 
 func (h *homeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Open the database connection
-	db, err := sql.Open("sqlite3", "./namedays.db")
+	db, err := sql.Open("sqlite3", h.dbPath)
 	if err != nil {
 		InternalServerErrorHandler(w, r)
 		return

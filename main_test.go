@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
@@ -391,5 +393,118 @@ func TestMemStore(t *testing.T) {
 	_, err = store.Get(testPersonKey)
 	if err == nil {
 		t.Errorf("Expected error when getting removed nameday")
+	}
+}
+
+// TestHomeHandler tests the home page handler
+func TestHomeHandler(t *testing.T) {
+	// Create a test database file
+	tmpDB, err := os.CreateTemp("", "test-namedays-*.db")
+	if err != nil {
+		t.Fatal("Failed to create temporary database:", err)
+	}
+	tmpDBPath := tmpDB.Name()
+	tmpDB.Close()
+	defer os.Remove(tmpDBPath)
+
+	// Initialize test database with some data
+	db, err := sql.Open("sqlite3", tmpDBPath)
+	if err != nil {
+		t.Fatal("Failed to open database:", err)
+	}
+	defer db.Close()
+
+	// Create table
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS namedays (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		date TEXT NOT NULL,
+		name TEXT NOT NULL
+	);`)
+	if err != nil {
+		t.Fatal("Failed to create table:", err)
+	}
+
+	// Insert test data with today's date
+	today := time.Now().Format("01-02")
+	_, err = db.Exec("INSERT INTO namedays (date, name) VALUES (?, ?)", today, "Test Name")
+	if err != nil {
+		t.Fatal("Failed to insert test data:", err)
+	}
+
+	// Create request
+	req, err := http.NewRequest(http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf(errFailedToCreateRequest, err)
+	}
+
+	// Set up test response recorder
+	rr := httptest.NewRecorder()
+
+	// Use the new constructor with our test DB path
+	handler := NewHomeHandler(tmpDBPath)
+
+	// Call the handler
+	handler.ServeHTTP(rr, req)
+
+	// Check response code
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf(errWrongStatusCode, status, http.StatusOK)
+	}
+
+	// Check that the response contains HTML
+	if !bytes.Contains(rr.Body.Bytes(), []byte("<!DOCTYPE html>")) {
+		t.Error("Response does not contain HTML")
+	}
+}
+
+func TestGetNamedayDB(t *testing.T) {
+	// Create a test database file
+	tmpDB, err := os.CreateTemp("", "test-namedays-*.db")
+	if err != nil {
+		t.Fatal("Failed to create temporary database:", err)
+	}
+	tmpDBPath := tmpDB.Name()
+	tmpDB.Close()
+	defer os.Remove(tmpDBPath)
+
+	// Initialize test database with some data
+	db, err := sql.Open("sqlite3", tmpDBPath)
+	if err != nil {
+		t.Fatal("Failed to open database:", err)
+	}
+	defer db.Close()
+
+	// Create table
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS namedays (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		date TEXT NOT NULL,
+		name TEXT NOT NULL
+	);`)
+	if err != nil {
+		t.Fatal("Failed to create table:", err)
+	}
+
+	// Insert test data
+	today := time.Now().Format("01-02")
+	testName := "Today's Test Name"
+	_, err = db.Exec("INSERT INTO namedays (date, name) VALUES (?, ?)", today, testName)
+	if err != nil {
+		t.Fatal("Failed to insert test data:", err)
+	}
+
+	// Call the function
+	names, err := getNameday(db)
+	if err != nil {
+		t.Fatal("getNameday returned an error:", err)
+	}
+
+	// Verify the result
+	if len(names) != 1 {
+		t.Errorf("Expected 1 name, got %d", len(names))
+	}
+	if len(names) > 0 && names[0] != testName {
+		t.Errorf("Expected name %s, got %s", testName, names[0])
 	}
 }
