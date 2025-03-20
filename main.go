@@ -1,15 +1,18 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/gosimple/slug"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
@@ -17,33 +20,167 @@ var (
 	NamedayReWithID = regexp.MustCompile(`^/nameday/([a-z0-9]+(?:-[a-z0-9]+)+)$`)
 )
 
-func main() {
-	store := NewMemStore()
-	namedayHandler := NewNamedayHandler(store)
-	mux := http.NewServeMux()
+// insertNamedaysFromJSON inserts namedays from JSON file into the database
+func insertNamedaysFromJSON(db *sql.DB) error {
+	jsonData, err := os.ReadFile("db-ops/namedays.json")
+	if err != nil {
+		return fmt.Errorf("failed to read namedays.json: %w", err)
+	}
 
-	mux.Handle("/", &homeHandler{})
-	mux.Handle("/nameday", namedayHandler)
-	mux.Handle("/nameday/", namedayHandler)
+	var namedays map[string][]string
+	if err := json.Unmarshal(jsonData, &namedays); err != nil {
+		return fmt.Errorf("failed to parse namedays.json: %w", err)
+	}
 
-	http.ListenAndServe(":8080", mux)
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	stmt, err := tx.Prepare("INSERT INTO namedays (date, name) VALUES (?, ?)")
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for date, names := range namedays {
+		for _, name := range names {
+			if _, err = stmt.Exec(date, name); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to insert nameday: %w", err)
+			}
+		}
+	}
+
+	return tx.Commit()
 }
 
-type homeHandler struct{}
-
-func (h *homeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	url := "https://gist.githubusercontent.com/laacz/5cccb056a533dffb2165/raw/5af9c97ef0b7c0256cbbf393bc45822aeb9ceba9/namedays-extended.json"
-	parsedData, err := ReadJSONFromURL(url)
+// InitDB ensures the database exists and has the proper schema
+func InitDB(dbPath string) error {
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
-		fmt.Println("Error:", err)
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	query := `CREATE TABLE IF NOT EXISTS namedays (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, name TEXT NOT NULL);`
+	if _, err = db.Exec(query); err != nil {
+		return fmt.Errorf("failed to create table: %w", err)
+	}
+
+	var count int
+	if err = db.QueryRow("SELECT COUNT(*) FROM namedays").Scan(&count); err != nil {
+		return fmt.Errorf("failed to check table count: %w", err)
+	}
+
+	if count == 0 {
+		fmt.Println("Reading namedays from JSON file...")
+		if err = insertNamedaysFromJSON(db); err != nil {
+			return err
+		}
+		fmt.Println("Namedays data inserted successfully")
+	}
+
+	return nil
+}
+
+func main() {
+	// Initialize database
+	dbPath := "./namedays.db"
+	if err := InitDB(dbPath); err != nil {
+		fmt.Printf("Error initializing database: %v\n", err)
 		return
 	}
 
-	currentMonth := GetCurrentMonth()
-	namedaysInMonth := FilterNamedaysByMonth(parsedData, currentMonth)
+	store := NewMemStore()
+	namedayHandler := NewNamedayHandler(store)
+	homeHandler := NewHomeHandler(dbPath)
+	mux := http.NewServeMux()
 
-	htmlOutput := RenderHTMLList(namedaysInMonth)
-	w.Write([]byte(htmlOutput))
+	mux.Handle("/", homeHandler)
+	mux.Handle("/nameday", namedayHandler)
+	mux.Handle("/nameday/", namedayHandler)
+
+	fmt.Println("Server starting on :8080...")
+	http.ListenAndServe(":8080", mux)
+}
+
+type homeHandler struct {
+	dbPath string
+}
+
+func NewHomeHandler(dbPath string) *homeHandler {
+	if dbPath == "" {
+		dbPath = "./namedays.db"
+	}
+	return &homeHandler{dbPath: dbPath}
+}
+
+func (h *homeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Open the database connection
+	db, err := sql.Open("sqlite3", h.dbPath)
+	if err != nil {
+		InternalServerErrorHandler(w, r)
+		return
+	}
+	defer db.Close()
+
+	// Get today's namedays
+	names, err := getNameday(db)
+	if err != nil {
+		InternalServerErrorHandler(w, r)
+		return
+	}
+
+	// Create HTML response
+	var sb strings.Builder
+	sb.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
+	sb.WriteString("  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+	sb.WriteString("  <title>Today's Namedays</title>\n</head>\n<body>\n")
+	sb.WriteString(fmt.Sprintf("  <h1>Namedays for %s</h1>\n", time.Now().Format("January 2")))
+
+	if len(names) == 0 {
+		sb.WriteString("  <p>No namedays found for today</p>\n")
+	} else {
+		sb.WriteString("  <ul>\n")
+		for _, name := range names {
+			sb.WriteString(fmt.Sprintf("    <li>%s</li>\n", name))
+		}
+		sb.WriteString("  </ul>\n")
+	}
+
+	sb.WriteString("</body>\n</html>")
+	w.Write([]byte(sb.String()))
+}
+
+func getNameday(db *sql.DB) ([]string, error) {
+	// Get today's date in the format "MM-DD"
+	today := time.Now().Format("01-02")
+
+	// Query the database for names on today's date
+	rows, err := db.Query("SELECT name FROM namedays WHERE date = ?", today)
+	if err != nil {
+		return nil, fmt.Errorf("error querying database: %w", err)
+	}
+	defer rows.Close()
+
+	// Collect all names for today
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("error scanning row: %w", err)
+		}
+		names = append(names, name)
+	}
+
+	// Check for any errors during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return names, nil
 }
 
 func ReadJSONFromURL(url string) (map[string][]string, error) {
