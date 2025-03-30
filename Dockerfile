@@ -18,7 +18,7 @@ ENV CGO_ENABLED=1
 COPY . .
 
 # Build the Go app
-RUN go build -o main .
+RUN GOMEMLIMIT=400MiB go build -o main .
 
 # Start a new stage from scratch
 FROM alpine:latest
